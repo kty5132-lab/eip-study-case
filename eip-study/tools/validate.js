@@ -1,7 +1,7 @@
 // 문제 데이터 검증: node tools/validate.js
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ctx = { window: {} }; vm.createContext(ctx);
-for (const f of ['written.js', 'practical.js', 'written2.js', 'practical2.js']) {
+for (const f of ['written.js', 'practical.js', 'written2.js', 'practical2.js', 'theory.js']) {
   const p = path.join(__dirname, '..', 'data', f);
   if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
 }
@@ -43,4 +43,30 @@ for (const [area, arr] of Object.entries(D.practical || {})) {
   pt += arr.length; console.log(area.padEnd(7), arr.length);
 }
 console.log('실기 합계', pt);
+console.log('— 이론 —'); let tt = 0;
+const balanced = (s) => ((s.match(/`/g) || []).length % 2 === 0) && ((s.replace(/`[^`]*`/g, '').match(/\*\*/g) || []).length % 2 === 0); // 코드 구간 안의 ** 는 제외
+const needStr = (id, s, what) => { if (typeof s !== 'string' || !s.trim()) err(`${id}: ${what} 비어 있음`); else if (!balanced(s)) err(`${id}: ${what}에 ** 또는 \` 짝이 안 맞음 → ${s.slice(0, 30)}`); };
+for (const [area, list] of Object.entries(D.theory || {})) {
+  if (!WA.includes(area)) err(`알 수 없는 이론 영역: ${area}`);
+  if (!Array.isArray(list) || !list.length) err(`이론 ${area}: 주제 없음`);
+  const titles = new Set();
+  list.forEach((t, i) => {
+    const id = `th-${area}-${i + 1}`;
+    needStr(id, t.t, '제목'); needStr(id, t.s, '요약'); if (titles.has(t.t)) err(`${id}: 제목 중복`); titles.add(t.t);
+    if (!Array.isArray(t.b) || !t.b.length) { err(`${id}: 본문 없음`); return; }
+    t.b.forEach((b, j) => {
+      const bid = `${id} 블록${j + 1}(${b[0]})`;
+      if (b[0] === 'p' || b[0] === 'tip') needStr(bid, b[1], '텍스트');
+      else if (b[0] === 'code') { if (typeof b[1] !== 'string' || !b[1].trim()) err(`${bid}: 코드 비어 있음`); }
+      else if (b[0] === 'ul' || b[0] === 'ol') { if (!Array.isArray(b[1]) || !b[1].length) err(`${bid}: 항목 없음`); else b[1].forEach((x) => needStr(bid, x, '항목')); }
+      else if (b[0] === 'table') {
+        if (!Array.isArray(b[1]) || !Array.isArray(b[2]) || !b[2].length) { err(`${bid}: 표 형식 오류`); return; }
+        b[1].forEach((x) => needStr(bid, x, '표 머리글'));
+        b[2].forEach((r, k) => { if (!Array.isArray(r) || r.length !== b[1].length) err(`${bid}: ${k + 1}번째 행의 칸 수(${r && r.length})가 머리글(${b[1].length})과 다름`); else r.forEach((x) => needStr(bid, x, '표 셀')); });
+      } else err(`${bid}: 알 수 없는 블록 종류`);
+    });
+  });
+  tt += list.length; console.log(area.padEnd(7), list.length);
+}
+console.log('이론 주제 합계', tt);
 console.log(errors ? `\n오류 ${errors}건` : '\n✔ 검증 통과'); process.exit(errors ? 1 : 0);

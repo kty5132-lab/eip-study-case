@@ -20,6 +20,8 @@
   let toastT;
   const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); };
   const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+  // 이론 본문용: `코드` 구간을 먼저 분리(그 안의 ** 는 그대로 표시)하고, 나머지에서만 **굵게** 허용. 모든 텍스트는 이스케이프
+  const fmt = (s) => String(s).split(/(`[^`]*`)/).map((seg) => (seg.length > 1 && seg[0] === '`' && seg.endsWith('`') ? `<code>${esc(seg.slice(1, -1))}</code>` : esc(seg).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'))).join('');
 
   /* ───────── 시험 구조 ───────── */
   const W_AREAS = {
@@ -54,7 +56,7 @@
 
   /* ───────── 상태 ───────── */
   const DEF = { exam: '2027', examDate: '', goal: 30, theme: 'auto' };
-  let S = Object.assign({ prog: {}, hist: [], daily: {} }, store.get(KEY, {}));
+  let S = Object.assign({ prog: {}, hist: [], daily: {}, theory: {} }, store.get(KEY, {}));
   S.settings = Object.assign({}, DEF, S.settings);
   const save = () => store.set(KEY, S);
   let session = store.get(SKEY, null);
@@ -161,7 +163,7 @@
     const tag = good === null ? (isBm(q) ? '<span class="badge warn">★</span>' : '') : good ? '<span class="badge ok">정답</span>' : '<span class="badge bad">오답</span>';
     const body = reviewBody(q, s ? s.ans[q.id] : undefined);
     return `<details class="card"><summary class="row between" style="cursor:pointer"><span class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q.q.split('\n')[0])}</span>${tag}</summary><div class="muted" style="margin-top:8px">${esc(areaName(q))}</div>${body}
-      <div class="btn-row"><button class="btn" data-act="bm" data-arg="${q.id}">${isBm(q) ? '★ 북마크 해제' : '☆ 북마크'}</button></div></details>`;
+      <div class="btn-row"><button class="btn" data-act="bm" data-arg="${q.id}">${isBm(q) ? '★ 북마크 해제' : '☆ 북마크'}</button>${q.kind === 'w' && TH()[q.area] ? `<a class="btn" href="#/theory/${q.area}">📖 이론 보기</a>` : ''}</div></details>`;
   }).join('');
 
   /* ───────── 화면(라우트) ───────── */
@@ -199,7 +201,8 @@
   const menu = (kind) => {
     const A = areas(kind), qs = Q.filter((q) => q.kind === kind);
     const wrong = qs.filter(isWrong).length, bm = qs.filter(isBm).length;
-    let h = item('🎯', '영역별 연습', '영역·문제 수·범위를 골라서 풀기', `#/setup/${kind}`);
+    let h = kind === 'w' ? item('📖', '이론 공부', `영역별 핵심 요약·비교표 · 읽음 ${thProgress().read}/${thProgress().total}`, '#/theory') : '';
+    h += item('🎯', '영역별 연습', '영역·문제 수·범위를 골라서 풀기', `#/setup/${kind}`);
     if (kind === 'w') h += item('⏱️', '모의고사', PROFILES[S.settings.exam].label + ' · 타이머·과락 판정', '#/mock');
     h += item('❌', `오답노트 <span class="badge ${wrong ? 'bad' : ''}">${wrong}</span>`, '마지막에 틀린 문제', `#/list/wrong/${kind}`);
     h += item('⭐', `북마크 <span class="badge">${bm}</span>`, '표시해 둔 문제', `#/list/bm/${kind}`);
@@ -286,6 +289,69 @@
     return { title: '통계', tab: 'stats', html: h };
   };
 
+  /* ── 이론 공부 ── */
+  const TH = () => (window.EIP_DATA || {}).theory || {};
+  const thKey = (a, i) => `${a}:${i}`;
+  const thStat = (a, i) => (S.theory || {})[thKey(a, i)];
+  function thProgress(area) {
+    const T = TH(); let total = 0, read = 0, confused = 0;
+    for (const [a, list] of Object.entries(T)) {
+      if (area && a !== area) continue;
+      list.forEach((_, i) => { total++; const s = thStat(a, i); if (s === 'read') read++; else if (s === 'confused') confused++; });
+    }
+    return { total, read, confused };
+  }
+  function thBlock([k, x, y]) {
+    if (k === 'p') return `<p>${fmt(x)}</p>`;
+    if (k === 'ul' || k === 'ol') return `<${k}>${x.map((i) => `<li>${fmt(i)}</li>`).join('')}</${k}>`;
+    if (k === 'table') return `<div class="tbl"><table class="th"><thead><tr>${x.map((c) => `<th>${fmt(c)}</th>`).join('')}</tr></thead><tbody>${y.map((r) => `<tr>${r.map((c) => `<td>${fmt(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    if (k === 'tip') return `<div class="tip">💡 ${fmt(x)}</div>`;
+    if (k === 'code') return `<pre class="code">${esc(x)}</pre>`;
+    return '';
+  }
+  const thBadge = (s) => (s === 'read' ? '<span class="badge ok">읽음</span>' : s === 'confused' ? '<span class="badge warn">헷갈림</span>' : '');
+  let thIndex = null; // 검색용 평문 색인 (최초 검색 시 생성)
+  function thSearch(q) {
+    q = q.trim().toLowerCase();
+    if (!q) return [];
+    if (!thIndex) {
+      thIndex = [];
+      for (const [a, list] of Object.entries(TH())) list.forEach((t, i) => {
+        const text = t.t + ' ' + t.s + ' ' + t.b.map((b) => (b[0] === 'table' ? [...b[1], ...b[2].flat()].join(' ') : Array.isArray(b[1]) ? b[1].join(' ') : b[1])).join(' ');
+        thIndex.push({ a, i, t: t.t, s: t.s, text: text.toLowerCase() });
+      });
+    }
+    return thIndex.map((e) => ({ e, score: (e.t.toLowerCase().includes(q) ? 2 : 0) + (e.text.includes(q) ? 1 : 0) })).filter((x) => x.score).sort((x, y) => y.score - x.score).slice(0, 20).map((x) => x.e);
+  }
+
+  VIEWS.theory = ([area, idx]) => {
+    const T = TH();
+    if (!area || !T[area]) {
+      const all = thProgress();
+      let h = `<div class="card"><div class="row between"><b>이론 진도</b><span class="muted">읽음 ${all.read} · 헷갈림 ${all.confused} / ${all.total}</span></div><div style="margin-top:8px">${bar(pct(all.read, all.total))}</div></div>
+        <input id="th-q" type="search" placeholder="이론 검색 (예: 정규화, OSI, 스케줄링)" autocomplete="off" enterkeyhint="search" data-search="1" style="margin-bottom:10px"><div id="th-results"></div><div id="th-list">`;
+      h += Object.entries(W_AREAS).filter(([k]) => T[k]).map(([k, v]) => {
+        const p = thProgress(k);
+        return `<a class="item" href="#/theory/${k}"><span class="grow"><div class="t">${v.n}</div><div class="s">${v.s}</div><div style="margin-top:6px">${bar(pct(p.read, p.total))}</div></span><span class="muted">${p.read}/${p.total}</span><span class="chev">›</span></a>`;
+      }).join('') + '</div>';
+      return { title: '이론 공부', back: '#/written', tab: 'written', html: h };
+    }
+    const list = T[area], ainfo = W_AREAS[area];
+    if (idx === undefined || !list[+idx]) {
+      const n = Q.filter((q) => q.kind === 'w' && q.area === area).length;
+      let h = `<p class="muted" style="margin:0 2px 10px">${esc(ainfo.s)}</p>`;
+      h += list.map((t, i) => `<a class="item" href="#/theory/${area}/${i}"><span class="grow"><div class="t">${i + 1}. ${esc(t.t)}</div><div class="s">${esc(t.s)}</div></span>${thBadge(thStat(area, i))}<span class="chev">›</span></a>`).join('');
+      h += `<button class="btn primary block" data-act="thPractice" data-arg="${area}" style="margin-top:12px">이 영역 문제 풀기 (${n}문제 중 10문제)</button>`;
+      return { title: ainfo.n, back: '#/theory', tab: 'written', html: h };
+    }
+    const i = +idx, t = list[i], st = thStat(area, i);
+    let h = `<div class="muted" style="margin:0 2px 4px">${esc(ainfo.n)} · ${i + 1}/${list.length}</div><h3 class="th-title">${esc(t.t)}</h3><div class="th-body">${t.b.map(thBlock).join('')}</div>
+      <div class="btn-row"><button class="btn ${st === 'confused' ? 'primary' : ''}" data-act="thMark" data-arg="${area}:${i}:confused">❓ 헷갈려요</button><button class="btn ${st === 'read' ? 'primary' : ''}" data-act="thMark" data-arg="${area}:${i}:read">✓ 읽었어요</button></div>
+      <button class="btn block" data-act="thPractice" data-arg="${area}" style="margin-top:8px">📝 이 영역 문제 풀기</button>
+      <div class="btn-row">${i > 0 ? `<a class="btn" href="#/theory/${area}/${i - 1}">‹ 이전</a>` : '<span></span>'}${i < list.length - 1 ? `<a class="btn" href="#/theory/${area}/${i + 1}">다음 ›</a>` : `<a class="btn" href="#/theory/${area}">목록</a>`}</div>`;
+    return { title: ainfo.n, back: `#/theory/${area}`, tab: 'written', html: h };
+  };
+
   /* ── 퀴즈 ── */
   VIEWS.quiz = () => {
     const s = session;
@@ -306,7 +372,7 @@
         if (reveal) cls = k === q.a ? 'right' : k === sel ? 'wrong' : ''; else if (sel === k) cls = 'sel';
         return `<button class="choice ${cls}" data-act="pick" data-arg="${k}"><span class="n">${k}</span><span class="tx">${esc(t)}</span></button>`;
       }).join('') + '</div>';
-      if (reveal) body += `<div class="explain"><div class="verdict ${sel === q.a ? 'ok' : 'bad'}">${sel === q.a ? '정답!' : sel === 0 ? `모르겠음 → 정답 ${mark(q.a)}` : `오답 → 정답 ${mark(q.a)}`}</div>${esc(q.e)}</div>`;
+      if (reveal) body += `<div class="explain"><div class="verdict ${sel === q.a ? 'ok' : 'bad'}">${sel === q.a ? '정답!' : sel === 0 ? `모르겠음 → 정답 ${mark(q.a)}` : `오답 → 정답 ${mark(q.a)}`}</div>${esc(q.e)}${TH()[q.area] ? `\n<a class="th-link" href="#/theory/${q.area}">📖 ${esc(areaName(q))} 이론 보기</a>` : ''}</div>`;
       if (mock) {
         body += `<h2>문항 이동</h2><div class="chips">${s.ids.map((id, i) => `<button class="chip ${i === s.idx ? 'on' : ''}" style="min-width:42px;padding:0 8px;${s.ans[id] !== undefined && i !== s.idx ? 'border-color:var(--primary)' : ''}" data-act="jump" data-arg="${i}">${i + 1}</button>`).join('')}</div>
           <p class="muted">답한 문항 ${Object.keys(s.ans).length}/${n} · 파란 테두리는 답한 문항</p><button class="btn block" data-act="submit" style="margin-top:8px">제출하기</button>`;
@@ -478,6 +544,16 @@
       saveSess(); A.next();
     },
     bm(id) { const p = (S.prog[id] ||= { n: 0, ok: 0, box: 0, due: 0, lastOk: null, bm: false }); p.bm = !p.bm; save(); route(); },
+    thMark(arg) {
+      const [a, i, st] = arg.split(':'); const k = thKey(a, i);
+      S.theory ||= {};
+      if (S.theory[k] === st) delete S.theory[k]; else S.theory[k] = st;
+      save(); toast(S.theory[k] === 'read' ? '읽음으로 표시했어요' : S.theory[k] === 'confused' ? '헷갈림으로 표시했어요' : '표시를 해제했어요'); route();
+    },
+    thPractice(area) {
+      const ids = shuffle(Q.filter((q) => q.kind === 'w' && q.area === area).map((q) => q.id)).slice(0, 10);
+      startSession({ kind: 'w', mode: 'practice', label: `${W_AREAS[area].n} 연습` }, ids);
+    },
     setExam(k) { S.settings.exam = k; save(); route(); },
     setTheme(k) { S.settings.theme = k; save(); applyTheme(); route(); },
     addKind(k) { ADD.kind = k; route(); },
@@ -503,7 +579,7 @@
     },
     async exportCopy() { try { await navigator.clipboard.writeText(exportText()); toast('복사했어요. 메모 앱 등에 붙여 두세요'); } catch { toast('복사 권한이 없어요. 파일로 저장을 이용하세요'); } },
     restore() { restoreFrom($('#restore-text').value); },
-    reset() { if (confirm('학습 기록(추가한 문제는 유지)을 모두 지울까요? 되돌릴 수 없어요.')) { S.prog = {}; S.hist = []; S.daily = {}; save(); session = null; saveSess(); toast('초기화했어요'); route(); } },
+    reset() { if (confirm('학습 기록(추가한 문제는 유지)을 모두 지울까요? 되돌릴 수 없어요.')) { S.prog = {}; S.hist = []; S.daily = {}; S.theory = {}; save(); session = null; saveSess(); toast('초기화했어요'); route(); } },
   };
   const exportText = () => JSON.stringify({ app: 'eip-study', v: 1, exported: new Date().toISOString(), state: S, custom: store.get(CKEY, []) });
   function restoreFrom(text) {
@@ -511,7 +587,7 @@
       const d = JSON.parse(text);
       if (d.app !== 'eip-study' || !d.state) throw new Error('bad');
       if (!confirm('현재 기록을 백업 내용으로 덮어쓸까요?')) return;
-      S = Object.assign({ prog: {}, hist: [], daily: {} }, d.state); S.settings = Object.assign({}, DEF, S.settings); save();
+      S = Object.assign({ prog: {}, hist: [], daily: {}, theory: {} }, d.state); S.settings = Object.assign({}, DEF, S.settings); save();
       store.set(CKEY, Array.isArray(d.custom) ? d.custom : []); reloadQ(); session = null; saveSess(); applyTheme(); toast('복원했어요'); go('#/');
     } catch { toast('백업 형식이 올바르지 않아요'); }
   }
@@ -520,6 +596,14 @@
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (el && A[el.dataset.act]) A[el.dataset.act](el.dataset.arg, el);
+  });
+  document.addEventListener('input', (e) => {
+    if (!e.target.dataset?.search) return;
+    const res = thSearch(e.target.value), box = $('#th-results'), list = $('#th-list');
+    if (!box) return;
+    const q = e.target.value.trim();
+    if (list) list.hidden = !!q;
+    box.innerHTML = !q ? '' : res.length ? res.map((r) => `<a class="item" href="#/theory/${r.a}/${r.i}"><span class="grow"><div class="t">${esc(r.t)}</div><div class="s">${esc(W_AREAS[r.a].n)} · ${esc(r.s)}</div></span><span class="chev">›</span></a>`).join('') : '<div class="empty">검색 결과가 없어요</div>';
   });
   document.addEventListener('change', (e) => {
     const el = e.target;
@@ -552,6 +636,7 @@
     document.body.classList.toggle('focus', !!r.focus);
     document.querySelectorAll('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === r.tab));
     $('#view').innerHTML = r.html;
+    document.querySelectorAll('#view .tbl').forEach((t) => { if (t.scrollWidth > t.clientWidth + 1) t.insertAdjacentHTML('afterend', '<div class="scroll-hint">↔ 표를 옆으로 밀어서 보세요</div>'); }); // 가로 스크롤이 필요한 표만 안내
     const tr = $('#topright'); tr.textContent = '';
     if (r.timer && session?.limit) {
       const tick = () => {
