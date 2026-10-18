@@ -13,7 +13,7 @@
 | 통계 | 영역별 정답률, 최근 14일 풀이량, 모의고사 기록, D-day, 하루 목표 |
 | 기타 | 다크모드, 오프라인 동작, 백업/복원(JSON), 내 문제 추가 |
 
-문제 은행: 필기 161문항, 실기 155문항(직접 작성한 학습용 문제). 코드 출력·계산 문제는 실제로 실행해 정답을 검증했습니다.
+문제 은행: 필기 256문항, 실기 244문항(직접 작성한 학습용 문제). 코드 출력·계산 문제는 실제로 실행해 정답을 검증했습니다.
 
 ## 시험 기준
 
@@ -53,7 +53,7 @@
 - 필기 `area`: `design` `dev` `ds` `db` `lang` `basic` `method` `sys` / `a`는 1부터 시작하는 정답 번호(보기 2~5개)
 - 실기 `area`: `se` `test` `db` `sql` `os` `sec` `code` `algo` / `type`: `term`(단답) `code`(결과값) `sql`(SQL) `desc`(서술형, `ans`는 빈 배열 가능, 해설이 모범답안)
 
-**방법 3 — 기본 문제 파일 수정**: `data/written.js`, `data/practical.js`.
+**방법 3 — 기본 문제 파일 수정**: `data/written.js`, `data/practical.js` (추가 세트는 `written2.js`, `practical2.js`).
 기록은 `영역-순번`으로 저장되므로 **각 영역 배열의 맨 뒤에만** 추가하세요. 수정 후 검증: `node tools/validate.js`
 
 ## 구조
@@ -61,7 +61,7 @@
 ```
 eip-study/
 ├─ index.html · style.css · app.js     앱 본체 (라우터·퀴즈 엔진·복습·통계·설정)
-├─ data/written.js · practical.js      문제 은행
+├─ data/written*.js · practical*.js    문제 은행 (…2.js는 추가 세트 1)
 ├─ sw.js · manifest.webmanifest        오프라인/설치(PWA)
 ├─ icons/                              앱 아이콘
 └─ tools/validate.js                   문제 데이터 검증 스크립트
