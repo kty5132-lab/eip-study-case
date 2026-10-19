@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>정처기 학습</title>
+<meta name="theme-color" content="#2f5bea">
+<meta name="description" content="정보처리기사 필기·실기 개인 학습 앱">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="정처기">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar"><button id="back" aria-label="뒤로" hidden>‹</button><h1 id="title">정처기 학습</h1><span id="topright"></span></header>
+<main id="view" tabindex="-1"></main>
+<nav id="tabs" aria-label="메인 메뉴">
+  <a href="#/" data-tab="home"><i>🏠</i>홈</a>
+  <a href="#/written" data-tab="written"><i>📝</i>필기</a>
+  <a href="#/practical" data-tab="practical"><i>⌨️</i>실기</a>
+  <a href="#/review" data-tab="review"><i>🔁</i>복습</a>
+  <a href="#/stats" data-tab="stats"><i>📊</i>통계</a>
+  <a href="#/settings" data-tab="settings"><i>⚙️</i>설정</a>
+</nav>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="data/written.js"></script>
+<script src="data/practical.js"></script>
+<script src="data/written2.js"></script>
+<script src="data/practical2.js"></script>
+<script src="data/theory.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
