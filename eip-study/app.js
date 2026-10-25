@@ -57,6 +57,7 @@
   /* ───────── 상태 ───────── */
   const DEF = { exam: '2027', examDate: '', goal: 30, theme: 'auto' };
   let S = Object.assign({ prog: {}, hist: [], daily: {}, theory: {} }, store.get(KEY, {}));
+  for (const k of Object.keys(S.theory || {})) if (!/^t\d+$/.test(k)) delete S.theory[k]; // 이전 형식(영역:순번)의 이론 진도는 폐기
   S.settings = Object.assign({}, DEF, S.settings);
   const save = () => store.set(KEY, S);
   let session = store.get(SKEY, null);
@@ -163,7 +164,7 @@
     const tag = good === null ? (isBm(q) ? '<span class="badge warn">★</span>' : '') : good ? '<span class="badge ok">정답</span>' : '<span class="badge bad">오답</span>';
     const body = reviewBody(q, s ? s.ans[q.id] : undefined);
     return `<details class="card"><summary class="row between" style="cursor:pointer"><span class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q.q.split('\n')[0])}</span>${tag}</summary><div class="muted" style="margin-top:8px">${esc(areaName(q))}</div>${body}
-      <div class="btn-row"><button class="btn" data-act="bm" data-arg="${q.id}">${isBm(q) ? '★ 북마크 해제' : '☆ 북마크'}</button>${q.kind === 'w' && TH()[q.area] ? `<a class="btn" href="#/theory/${q.area}">📖 이론 보기</a>` : ''}</div></details>`;
+      <div class="btn-row"><button class="btn" data-act="bm" data-arg="${q.id}">${isBm(q) ? '★ 북마크 해제' : '☆ 북마크'}</button>${q.kind === 'w' && thByArea(q.area).length ? `<a class="btn" href="#/theory/a/${q.area}">📖 이론 보기</a>` : ''}</div></details>`;
   }).join('');
 
   /* ───────── 화면(라우트) ───────── */
@@ -201,7 +202,7 @@
   const menu = (kind) => {
     const A = areas(kind), qs = Q.filter((q) => q.kind === kind);
     const wrong = qs.filter(isWrong).length, bm = qs.filter(isBm).length;
-    let h = kind === 'w' ? item('📖', '이론 공부', `영역별 핵심 요약·비교표 · 읽음 ${thProgress().read}/${thProgress().total}`, '#/theory') : '';
+    let h = kind === 'w' ? item('📖', '이론 공부', `5과목 · ${thProgress().total}개 항목 · 읽음 ${thProgress().read}`, '#/theory') : '';
     h += item('🎯', '영역별 연습', '영역·문제 수·범위를 골라서 풀기', `#/setup/${kind}`);
     if (kind === 'w') h += item('⏱️', '모의고사', PROFILES[S.settings.exam].label + ' · 타이머·과락 판정', '#/mock');
     h += item('❌', `오답노트 <span class="badge ${wrong ? 'bad' : ''}">${wrong}</span>`, '마지막에 틀린 문제', `#/list/wrong/${kind}`);
@@ -289,18 +290,29 @@
     return { title: '통계', tab: 'stats', html: h };
   };
 
-  /* ── 이론 공부 ── */
-  const TH = () => (window.EIP_DATA || {}).theory || {};
-  const thKey = (a, i) => `${a}:${i}`;
-  const thStat = (a, i) => (S.theory || {})[thKey(a, i)];
-  function thProgress(area) {
-    const T = TH(); let total = 0, read = 0, confused = 0;
-    for (const [a, list] of Object.entries(T)) {
-      if (area && a !== area) continue;
-      list.forEach((_, i) => { total++; const s = thStat(a, i); if (s === 'read') read++; else if (s === 'confused') confused++; });
-    }
-    return { total, read, confused };
+  /* ── 이론 공부 (목차 구조: 과목 → 대단원 → 001~157 항목) ── */
+  const TH = () => (window.EIP_DATA || {}).theory || {};   // { 번호: { no, g(빈출 등급), a(영역), t, s, kw, b } }
+  const TOC = () => (window.EIP_DATA || {}).toc || [];     // [{ n, ch: [{ n, nos }] }]
+  const thKey = (no) => 't' + no;
+  const thStat = (no) => (S.theory || {})[thKey(no)];
+  const thNos = () => Object.keys(TH()).map(Number).sort((x, y) => x - y);
+  const thByArea = (area) => thNos().filter((n) => TH()[n].a === area);
+  const pad3 = (n) => String(n).padStart(3, '0');
+  const GRADES = { A: '매 회차 출제', B: '2회에 1번꼴', C: '3회에 1번꼴', D: '4회에 1번꼴' };
+  let thGrade = 'all'; // 출제 빈도 필터 (화면을 이동해도 유지)
+  const thShow = (no) => thGrade === 'all' || TH()[no].g === thGrade;
+  const gradeBadge = (g) => `<span class="gr gr-${g}" title="${GRADES[g] || ''}">${g}</span>`;
+  const thBadge = (s) => (s === 'read' ? '<span class="badge ok">읽음</span>' : s === 'confused' ? '<span class="badge warn">헷갈림</span>' : '');
+  function thProgress(nos) {
+    nos = nos || thNos(); let read = 0, confused = 0;
+    nos.forEach((n) => { const st = thStat(n); if (st === 'read') read++; else if (st === 'confused') confused++; });
+    return { total: nos.length, read, confused };
   }
+  let thLocMap = null;
+  const thLoc = (no) => { // 번호 → 과목/대단원 위치
+    if (!thLocMap) { thLocMap = new Map(); TOC().forEach((sub, si) => sub.ch.forEach((c, ci) => c.nos.forEach((n) => thLocMap.set(n, { si, ci })))); }
+    return thLocMap.get(no);
+  };
   function thBlock([k, x, y]) {
     if (k === 'p') return `<p>${fmt(x)}</p>`;
     if (k === 'ul' || k === 'ol') return `<${k}>${x.map((i) => `<li>${fmt(i)}</li>`).join('')}</${k}>`;
@@ -309,47 +321,74 @@
     if (k === 'code') return `<pre class="code">${esc(x)}</pre>`;
     return '';
   }
-  const thBadge = (s) => (s === 'read' ? '<span class="badge ok">읽음</span>' : s === 'confused' ? '<span class="badge warn">헷갈림</span>' : '');
+  const qText = new Map(); // 관련 문제 검색용 소문자 평문 캐시
+  const qHay = (q) => { let t = qText.get(q.id); if (t === undefined) { t = [q.q, q.code, q.e, ...(q.c || []), ...(q.ans || [])].join('\n').toLowerCase(); qText.set(q.id, t); } return t; };
+  function thRelated(no, kind) { // 항목의 키워드(kw)가 문제 본문·보기·정답·해설에 들어 있는 문제
+    const t = TH()[no]; if (!t || !t.kw || !t.kw.length) return [];
+    const kws = t.kw.map((k) => k.toLowerCase());
+    return Q.filter((q) => q.kind === kind && kws.some((k) => qHay(q).includes(k)));
+  }
+  const thItem = (no) => { const t = TH()[no]; return `<a class="item" href="#/theory/t/${no}"><span class="no">${pad3(no)}</span><span class="grow"><div class="t">${esc(t.t)}</div><div class="s">${esc(t.s)}</div></span>${gradeBadge(t.g)}${thBadge(thStat(no))}<span class="chev">›</span></a>`; };
+  const gradeChips = () => `<div class="chips" style="margin:6px 0 4px">${['all', 'A', 'B', 'C', 'D'].map((g) => `<button class="chip ${thGrade === g ? 'on' : ''}" data-act="thGrade" data-arg="${g}">${g === 'all' ? '전체' : g + ' 등급'}</button>`).join('')}</div><div class="muted" style="font-size:12px;margin-bottom:6px">출제 빈도: A 매 회차 · B 2회에 1번 · C 3회에 1번 · D 4회에 1번꼴 (교재 목차의 표시를 따랐고 일부는 추정)</div>`;
   let thIndex = null; // 검색용 평문 색인 (최초 검색 시 생성)
   function thSearch(q) {
     q = q.trim().toLowerCase();
     if (!q) return [];
     if (!thIndex) {
-      thIndex = [];
-      for (const [a, list] of Object.entries(TH())) list.forEach((t, i) => {
-        const text = t.t + ' ' + t.s + ' ' + t.b.map((b) => (b[0] === 'table' ? [...b[1], ...b[2].flat()].join(' ') : Array.isArray(b[1]) ? b[1].join(' ') : b[1])).join(' ');
-        thIndex.push({ a, i, t: t.t, s: t.s, text: text.toLowerCase() });
+      thIndex = thNos().map((no) => {
+        const t = TH()[no];
+        const text = [t.t, t.s, ...(t.kw || []), ...t.b.map((b) => (b[0] === 'table' ? [...b[1], ...b[2].flat()].join(' ') : Array.isArray(b[1]) ? b[1].join(' ') : b[1]))].join(' ').toLowerCase();
+        return { no, t: t.t, s: t.s, g: t.g, title: t.t.toLowerCase(), key: pad3(no), text };
       });
     }
-    return thIndex.map((e) => ({ e, score: (e.t.toLowerCase().includes(q) ? 2 : 0) + (e.text.includes(q) ? 1 : 0) })).filter((x) => x.score).sort((x, y) => y.score - x.score).slice(0, 20).map((x) => x.e);
+    return thIndex.map((e) => ({ e, score: (e.key === q || String(e.no) === q ? 5 : 0) + (e.title.includes(q) ? 3 : 0) + (e.text.includes(q) ? 1 : 0) })).filter((x) => x.score).sort((x, y) => y.score - x.score || x.e.no - y.e.no).slice(0, 30).map((x) => x.e);
   }
 
-  VIEWS.theory = ([area, idx]) => {
-    const T = TH();
-    if (!area || !T[area]) {
-      const all = thProgress();
-      let h = `<div class="card"><div class="row between"><b>이론 진도</b><span class="muted">읽음 ${all.read} · 헷갈림 ${all.confused} / ${all.total}</span></div><div style="margin-top:8px">${bar(pct(all.read, all.total))}</div></div>
-        <input id="th-q" type="search" placeholder="이론 검색 (예: 정규화, OSI, 스케줄링)" autocomplete="off" enterkeyhint="search" data-search="1" style="margin-bottom:10px"><div id="th-results"></div><div id="th-list">`;
-      h += Object.entries(W_AREAS).filter(([k]) => T[k]).map(([k, v]) => {
-        const p = thProgress(k);
-        return `<a class="item" href="#/theory/${k}"><span class="grow"><div class="t">${v.n}</div><div class="s">${v.s}</div><div style="margin-top:6px">${bar(pct(p.read, p.total))}</div></span><span class="muted">${p.read}/${p.total}</span><span class="chev">›</span></a>`;
-      }).join('') + '</div>';
-      return { title: '이론 공부', back: '#/written', tab: 'written', html: h };
-    }
-    const list = T[area], ainfo = W_AREAS[area];
-    if (idx === undefined || !list[+idx]) {
-      const n = Q.filter((q) => q.kind === 'w' && q.area === area).length;
-      let h = `<p class="muted" style="margin:0 2px 10px">${esc(ainfo.s)}</p>`;
-      h += list.map((t, i) => `<a class="item" href="#/theory/${area}/${i}"><span class="grow"><div class="t">${i + 1}. ${esc(t.t)}</div><div class="s">${esc(t.s)}</div></span>${thBadge(thStat(area, i))}<span class="chev">›</span></a>`).join('');
-      h += `<button class="btn primary block" data-act="thPractice" data-arg="${area}" style="margin-top:12px">이 영역 문제 풀기 (${n}문제 중 10문제)</button>`;
-      return { title: ainfo.n, back: '#/theory', tab: 'written', html: h };
-    }
-    const i = +idx, t = list[i], st = thStat(area, i);
-    let h = `<div class="muted" style="margin:0 2px 4px">${esc(ainfo.n)} · ${i + 1}/${list.length}</div><h3 class="th-title">${esc(t.t)}</h3><div class="th-body">${t.b.map(thBlock).join('')}</div>
-      <div class="btn-row"><button class="btn ${st === 'confused' ? 'primary' : ''}" data-act="thMark" data-arg="${area}:${i}:confused">❓ 헷갈려요</button><button class="btn ${st === 'read' ? 'primary' : ''}" data-act="thMark" data-arg="${area}:${i}:read">✓ 읽었어요</button></div>
-      <button class="btn block" data-act="thPractice" data-arg="${area}" style="margin-top:8px">📝 이 영역 문제 풀기</button>
-      <div class="btn-row">${i > 0 ? `<a class="btn" href="#/theory/${area}/${i - 1}">‹ 이전</a>` : '<span></span>'}${i < list.length - 1 ? `<a class="btn" href="#/theory/${area}/${i + 1}">다음 ›</a>` : `<a class="btn" href="#/theory/${area}">목록</a>`}</div>`;
-    return { title: ainfo.n, back: `#/theory/${area}`, tab: 'written', html: h };
+  function thIndexView() {
+    const all = thProgress(), toc = TOC();
+    let h = `<div class="card"><div class="row between"><b>이론 진도</b><span class="muted">읽음 ${all.read} · 헷갈림 ${all.confused} / ${all.total}</span></div><div style="margin-top:8px">${bar(pct(all.read, all.total))}</div></div>
+      <input id="th-q" type="search" placeholder="이론 검색 (예: 정규화, OSI, 067)" autocomplete="off" enterkeyhint="search" data-search="1" style="margin-bottom:6px"><div id="th-results"></div><div id="th-list">${gradeChips()}`;
+    h += toc.map((sub, si) => {
+      const nos = sub.ch.flatMap((c) => c.nos).filter((n) => TH()[n]), shown = nos.filter(thShow), p = thProgress(nos);
+      return `<a class="item" href="#/theory/s/${si}"><span class="no">${si + 1}</span><span class="grow"><div class="t">${esc(sub.n)}</div><div class="s">대단원 ${sub.ch.length}개 · 항목 ${thGrade === 'all' ? nos.length : `${shown.length}/${nos.length}`}개</div><div style="margin-top:6px">${bar(pct(p.read, p.total))}</div></span><span class="muted">${p.read}/${p.total}</span><span class="chev">›</span></a>`;
+    }).join('');
+    h += `<h2>영역별로 보기</h2><div class="chips">${Object.entries(W_AREAS).filter(([k]) => thByArea(k).length).map(([k, v]) => `<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none" href="#/theory/a/${k}">${esc(v.n)} ${thByArea(k).length}</a>`).join('')}</div></div>`;
+    return { title: '이론 공부', back: '#/written', tab: 'written', html: h };
+  }
+  function thSubject(si) {
+    const sub = TOC()[si];
+    let h = `<div class="muted" style="margin:0 2px">${esc(sub.n)} · 대단원 ${sub.ch.length}개</div>${gradeChips()}`;
+    sub.ch.forEach((c, ci) => {
+      const nos = c.nos.filter((n) => TH()[n]), shown = nos.filter(thShow), p = thProgress(nos);
+      h += `<h2>${ci + 1}. ${esc(c.n)} <span style="font-weight:400">· ${p.read}/${p.total} 읽음</span></h2>`;
+      h += shown.length ? shown.map(thItem).join('') : '<div class="muted" style="margin:0 2px 8px">선택한 등급의 항목이 없어요</div>';
+    });
+    return { title: sub.n, back: '#/theory', tab: 'written', html: h };
+  }
+  function thArea(area) {
+    const nos = thByArea(area), n = Q.filter((q) => q.kind === 'w' && q.area === area).length;
+    let h = `<p class="muted" style="margin:0 2px 4px">${esc(W_AREAS[area].s)}</p>${gradeChips()}`;
+    h += nos.filter(thShow).map(thItem).join('') || '<div class="muted" style="margin:0 2px 8px">선택한 등급의 항목이 없어요</div>';
+    h += `<button class="btn primary block" data-act="thPractice" data-arg="${area}" style="margin-top:12px">이 영역 문제 풀기 (필기 ${n}문제 중 10문제)</button>`;
+    return { title: W_AREAS[area].n, back: '#/theory', tab: 'written', html: h };
+  }
+  function thTopic(no) {
+    const t = TH()[no], st = thStat(no), loc = thLoc(no), toc = TOC(), nos = thNos(), idx = nos.indexOf(no);
+    const where = loc ? `${toc[loc.si].n} › ${toc[loc.si].ch[loc.ci].n}` : '';
+    const rw = thRelated(no, 'w').length, rp = thRelated(no, 'p').length;
+    let h = `<div class="muted" style="margin:0 2px 4px">${esc(where)}</div><h3 class="th-title"><span class="no">${pad3(no)}</span> ${esc(t.t)} ${gradeBadge(t.g)}</h3><div class="th-body">${t.b.map(thBlock).join('')}</div>
+      <div class="btn-row"><button class="btn ${st === 'confused' ? 'primary' : ''}" data-act="thMark" data-arg="${no}:confused">❓ 헷갈려요</button><button class="btn ${st === 'read' ? 'primary' : ''}" data-act="thMark" data-arg="${no}:read">✓ 읽었어요</button></div>
+      <h2>이 주제 문제 풀기</h2>
+      <div class="btn-row" style="margin-top:0"><button class="btn" data-act="thRelated" data-arg="${no}:w" ${rw ? '' : 'disabled'}>📝 필기 ${rw}문제</button><button class="btn" data-act="thRelated" data-arg="${no}:p" ${rp ? '' : 'disabled'}>⌨️ 실기 ${rp}문제</button></div>
+      <div class="btn-row">${idx > 0 ? `<a class="btn" href="#/theory/t/${nos[idx - 1]}">‹ ${pad3(nos[idx - 1])}</a>` : '<span></span>'}${idx < nos.length - 1 ? `<a class="btn" href="#/theory/t/${nos[idx + 1]}">${pad3(nos[idx + 1])} ›</a>` : '<span></span>'}</div>`;
+    return { title: `${pad3(no)} ${t.t}`, back: loc ? `#/theory/s/${loc.si}` : '#/theory', tab: 'written', html: h };
+  }
+  VIEWS.theory = ([mode, arg]) => {
+    if (!thNos().length) return { title: '이론 공부', back: '#/written', tab: 'written', html: '<div class="empty">이론 데이터가 없어요</div>' };
+    if (mode === 't' && TH()[+arg]) return thTopic(+arg);
+    if (mode === 's' && TOC()[+arg]) return thSubject(+arg);
+    if (mode === 'a' && W_AREAS[arg]) return thArea(arg);
+    return thIndexView();
   };
 
   /* ── 퀴즈 ── */
@@ -372,7 +411,7 @@
         if (reveal) cls = k === q.a ? 'right' : k === sel ? 'wrong' : ''; else if (sel === k) cls = 'sel';
         return `<button class="choice ${cls}" data-act="pick" data-arg="${k}"><span class="n">${k}</span><span class="tx">${esc(t)}</span></button>`;
       }).join('') + '</div>';
-      if (reveal) body += `<div class="explain"><div class="verdict ${sel === q.a ? 'ok' : 'bad'}">${sel === q.a ? '정답!' : sel === 0 ? `모르겠음 → 정답 ${mark(q.a)}` : `오답 → 정답 ${mark(q.a)}`}</div>${esc(q.e)}${TH()[q.area] ? `\n<a class="th-link" href="#/theory/${q.area}">📖 ${esc(areaName(q))} 이론 보기</a>` : ''}</div>`;
+      if (reveal) body += `<div class="explain"><div class="verdict ${sel === q.a ? 'ok' : 'bad'}">${sel === q.a ? '정답!' : sel === 0 ? `모르겠음 → 정답 ${mark(q.a)}` : `오답 → 정답 ${mark(q.a)}`}</div>${esc(q.e)}${thByArea(q.area).length ? `\n<a class="th-link" href="#/theory/a/${q.area}">📖 ${esc(areaName(q))} 이론 보기</a>` : ''}</div>`;
       if (mock) {
         body += `<h2>문항 이동</h2><div class="chips">${s.ids.map((id, i) => `<button class="chip ${i === s.idx ? 'on' : ''}" style="min-width:42px;padding:0 8px;${s.ans[id] !== undefined && i !== s.idx ? 'border-color:var(--primary)' : ''}" data-act="jump" data-arg="${i}">${i + 1}</button>`).join('')}</div>
           <p class="muted">답한 문항 ${Object.keys(s.ans).length}/${n} · 파란 테두리는 답한 문항</p><button class="btn block" data-act="submit" style="margin-top:8px">제출하기</button>`;
@@ -545,14 +584,19 @@
     },
     bm(id) { const p = (S.prog[id] ||= { n: 0, ok: 0, box: 0, due: 0, lastOk: null, bm: false }); p.bm = !p.bm; save(); route(); },
     thMark(arg) {
-      const [a, i, st] = arg.split(':'); const k = thKey(a, i);
+      const [no, st] = arg.split(':'); const k = thKey(no);
       S.theory ||= {};
       if (S.theory[k] === st) delete S.theory[k]; else S.theory[k] = st;
       save(); toast(S.theory[k] === 'read' ? '읽음으로 표시했어요' : S.theory[k] === 'confused' ? '헷갈림으로 표시했어요' : '표시를 해제했어요'); route();
     },
+    thGrade(g) { thGrade = g; route(); },
     thPractice(area) {
       const ids = shuffle(Q.filter((q) => q.kind === 'w' && q.area === area).map((q) => q.id)).slice(0, 10);
       startSession({ kind: 'w', mode: 'practice', label: `${W_AREAS[area].n} 연습` }, ids);
+    },
+    thRelated(arg) {
+      const [no, kind] = arg.split(':'); const t = TH()[+no];
+      startSession({ kind, mode: 'practice', label: `${pad3(+no)} ${t.t}` }, shuffle(thRelated(+no, kind).map((q) => q.id)).slice(0, 10));
     },
     setExam(k) { S.settings.exam = k; save(); route(); },
     setTheme(k) { S.settings.theme = k; save(); applyTheme(); route(); },
@@ -603,7 +647,7 @@
     if (!box) return;
     const q = e.target.value.trim();
     if (list) list.hidden = !!q;
-    box.innerHTML = !q ? '' : res.length ? res.map((r) => `<a class="item" href="#/theory/${r.a}/${r.i}"><span class="grow"><div class="t">${esc(r.t)}</div><div class="s">${esc(W_AREAS[r.a].n)} · ${esc(r.s)}</div></span><span class="chev">›</span></a>`).join('') : '<div class="empty">검색 결과가 없어요</div>';
+    box.innerHTML = !q ? '' : res.length ? res.map((r) => `<a class="item" href="#/theory/t/${r.no}"><span class="no">${pad3(r.no)}</span><span class="grow"><div class="t">${esc(r.t)}</div><div class="s">${esc(r.s)}</div></span>${gradeBadge(r.g)}<span class="chev">›</span></a>`).join('') : '<div class="empty">검색 결과가 없어요</div>';
   });
   document.addEventListener('change', (e) => {
     const el = e.target;
